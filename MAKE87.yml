@@ -1,6 +1,43 @@
-build_kit:
-  name: python3
-  version: latest
-outbound_topics:
-  - name: HELLO_WORLD_MESSAGE
-    message_type: make87_messages.text.text_plain.PlainText
+version: 1
+build:
+  build_kit:
+    name: python3
+dev_build:
+  build_kit:
+    name: python3
+
+interfaces:
+  - name: user-interface
+    protocol: http
+    servers:
+      - name: chat
+        spec:
+          string: custom-user-interface
+        port:
+          name: chat-port
+          protocol: HTTP
+          target_port: 8089
+          is_system_interface: true
+  - name: zenoh-client
+    protocol: zenoh
+    default_port:
+      name: zenoh-client
+      protocol: TCP
+      target_port: 7447
+    subscribers:
+      - name: CAMERA_IMAGE
+        spec:
+          make87_message: make87_messages.image.compressed.image_jpeg.ImageJPEG
+        encoding: proto
+      - name: AGENT_LOGS
+        spec:
+          string: string
+        encoding: utf-8
+    requesters:
+      - name: agent-chat
+        request_spec:
+          string: string
+        response_spec:
+          string: string
+        encoding: utf-8
+container_config: {}

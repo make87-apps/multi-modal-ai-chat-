@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full w-full dark">
+<head>
+  <meta charset="UTF-8">
+  <title>AI Chat</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --foreground: #ffffff;
+      --background: #0a0a0a;
+      --muted: #1a1a1a;
+      --muted-foreground: #aaaaaa;
+      --border: #333333;
+      --accent: #ffffff;
+    }
+
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background-color: var(--background);
+      color: var(--foreground);
+    }
+
+    .glow {
+      text-shadow: 0 0 4px var(--accent);
+    }
+
+    .overlay-img {
+      width: 100%;
+      border: 1px solid var(--accent);
+      border-radius: 0.5rem;
+      box-shadow: 0 0 8px var(--accent);
+      background-color: var(--background);
+      pointer-events: none;
+    }
+
+    .status-panel {
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 0.5rem;
+      background-color: var(--muted);
+      color: var(--muted-foreground);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body class="h-full w-full relative overflow-hidden">
+
+<!-- MAIN AREA: Chat + Image/Status -->
+<div class="flex flex-row h-[90%] w-full overflow-hidden">
+  <!-- Chat -->
+  <div id="chat-container" class="flex-1 overflow-y-auto p-4 text-sm">
+    <div id="chat" class="w-full mx-auto space-y-3"></div>
+  </div>
+
+  <!-- Image + Status stacked -->
+  <div class="w-[20%] flex flex-col space-y-4 p-4">
+    <img id="overlayImage" src="" alt="Live feed" class="overlay-img hidden" />
+    <div id="statusPanel" class="status-panel hidden flex-1 overflow-y-auto">
+      <div class="font-bold mb-1">Agent Actions</div>
+      <div id="statusContent" class="space-y-1"></div>
+    </div>
+  </div>
+</div>
+
+<!-- INPUT AREA -->
+<div class="border-t border-[var(--border)] p-4 flex gap-2 w-full">
+  <input id="messageInput" type="text" placeholder="Type your command..."
+    class="flex-1 px-4 py-2 rounded-md border border-[var(--border)] bg-[var(--muted)] text-[var(--foreground)] focus:ring-2 focus:ring-[var(--accent)]"
+    onkeydown="handleKey(event)" />
+  <button onclick="sendMessage()"
+    class="px-4 py-2 rounded-md border border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-[var(--background)] transition">
+    Send
+  </button>
+</div>
+
+<script>
+  const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws-agent");
+  const chat = document.getElementById("chat");
+  const chatContainer = document.getElementById("chat-container");
+
+  ws.onmessage = (event) => {
+    try {
+      let msg = JSON.parse(event.data);
+      if (typeof msg === "string") msg = JSON.parse(msg);
+
+      if (msg.type === "text" && msg.data) {
+        const aiMessage = document.createElement("div");
+        aiMessage.className = "text-left bg-[var(--muted)] px-3 py-2 rounded-md border border-[var(--border)] glow";
+        aiMessage.textContent = msg.data;
+        chat.appendChild(aiMessage);
+      } else if (msg.type === "action_suggestion" && msg.actions) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "space-y-2 text-left";
+
+        if (msg.message) {
+          const prompt = document.createElement("div");
+          prompt.textContent = msg.message;
+          wrapper.appendChild(prompt);
+        }
+
+        const buttonContainer = document.createElement("div");
+        buttonContainer.className = "flex gap-2 flex-wrap";
+
+        msg.actions.forEach(action => {
+          const button = document.createElement("button");
+          button.textContent = action.label;
+          button.className = "px-3 py-1 rounded-md border border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-[var(--background)] transition";
+          button.onclick = () => {
+            ws.send(JSON.stringify({ type: "action", action: action.action, params: action.params || {} }));
+          };
+          buttonContainer.appendChild(button);
+        });
+
+        wrapper.appendChild(buttonContainer);
+        chat.appendChild(wrapper);
+      }
+    } catch (_) {
+      const fallback = document.createElement("div");
+      fallback.className = "text-left bg-[var(--muted)] px-3 py-2 rounded-md border border-[var(--border)] glow";
+      fallback.textContent = event.data;
+      chat.appendChild(fallback);
+    }
+
+    autoScrollChat();
+  };
+
+  function sendMessage() {
+    const input = document.getElementById("messageInput");
+    const text = input.value.trim();
+    if (text) {
+      const userMessage = document.createElement("div");
+      userMessage.className = "self-end text-right bg-[var(--accent)] text-[var(--background)] px-3 py-2 rounded-md";
+      userMessage.textContent = text;
+      chat.appendChild(userMessage);
+      ws.send(text);
+      input.value = "";
+      autoScrollChat();
+    }
+  }
+
+  function handleKey(event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      sendMessage();
+    }
+  }
+
+  function autoScrollChat() {
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+  }
+
+  // Image websocket
+  const imageWs = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws-image");
+  const overlayImg = document.getElementById("overlayImage");
+
+  imageWs.onmessage = (event) => {
+    const blob = event.data;
+    const url = URL.createObjectURL(blob);
+    overlayImg.src = url;
+    overlayImg.classList.remove("hidden");
+
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
+  // Status websocket
+  const statusWs = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws-status");
+  const statusPanel = document.getElementById("statusPanel");
+  const statusContent = document.getElementById("statusContent");
+
+  statusWs.onmessage = (event) => {
+    statusPanel.classList.remove("hidden");
+    const text = event.data.trim();
+    if (text) {
+      const line = document.createElement("div");
+      line.textContent = text;
+      statusContent.appendChild(line);
+      statusPanel.scrollTop = statusPanel.scrollHeight;
+    }
+  };
+</script>
+</body>
+</html>
