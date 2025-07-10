@@ -27,14 +27,12 @@ async def serve_ui_with_zenoh():
     app.add_middleware(GZipMiddleware, minimum_size=500)
 
     zenoh_interface = ZenohInterface(name="zenoh-client", make87_config=config)
-    image_sub = zenoh_interface.get_subscriber(name="CAMERA_IMAGE")
-    log_sub = zenoh_interface.get_subscriber(name="AGENT_LOGS")
-    requester = zenoh_interface.get_requester(name="agent-chat")
 
     @app.websocket("/ws-agent")
     async def ws_chat(ws: WebSocket):
         await ws.accept()
         try:
+            requester = zenoh_interface.get_requester(name="agent-chat")
             while True:
                 msg = await ws.receive_text()
                 try:
@@ -47,6 +45,8 @@ async def serve_ui_with_zenoh():
                     await ws.send_text(f"Error processing message: {e}")
         except WebSocketDisconnect:
             logging.info("WebSocket disconnected")
+        except KeyError as e:
+            await ws.send_text("No agent available to chat with.")
 
     @app.websocket("/ws-image")
     async def websocket_image(ws: WebSocket):
@@ -56,6 +56,7 @@ async def serve_ui_with_zenoh():
         await ws.send_bytes(b'\xff\xd8\xff\xd9')  # Dummy JPEG marker
 
         try:
+            image_sub = zenoh_interface.get_subscriber(name="CAMERA_IMAGE")
             while True:
                 sample = image_sub.try_recv()
                 if not sample:
@@ -65,6 +66,8 @@ async def serve_ui_with_zenoh():
                 await ws.send_bytes(image.data)
         except WebSocketDisconnect:
             logging.info("WebSocket image client disconnected.")
+        except KeyError as e:
+            pass
         finally:
             connected_clients.discard(ws)
 
@@ -72,7 +75,9 @@ async def serve_ui_with_zenoh():
     async def agent_status_stream(ws: WebSocket):
         await ws.accept()
         await ws.send_text("connected")
+
         try:
+            log_sub = zenoh_interface.get_subscriber(name="AGENT_LOGS")
             while True:
                 sample = log_sub.try_recv()
                 if sample:
@@ -83,6 +88,9 @@ async def serve_ui_with_zenoh():
                     await asyncio.sleep(0.1)
         except WebSocketDisconnect:
             logging.info("WebSocket log client disconnected.")
+        except KeyError as e:
+            await ws.send_text("no logs available")
+
 
     @app.get("/")
     @app.get("/{path:path}")
