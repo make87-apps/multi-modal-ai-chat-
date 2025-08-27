@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import make87 as m87
+import zenoh
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
@@ -34,7 +35,7 @@ async def serve_ui_with_zenoh():
         try:
             publisher = zenoh_interface.get_publisher(name="USER_INPUT")
 
-            def send_msg_callback(sample: m87.Sample):
+            def send_msg_callback(sample: zenoh.Sample):
                 if sample and sample.payload:
                     response = sample.payload.to_bytes().decode("utf-8")
                     asyncio.create_task(ws.send_text(response))
