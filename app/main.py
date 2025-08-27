@@ -32,15 +32,19 @@ async def serve_ui_with_zenoh():
     async def ws_chat(ws: WebSocket):
         await ws.accept()
         try:
-            requester = zenoh_interface.get_requester(name="agent-chat")
+            publisher = zenoh_interface.get_publisher(name="USER_INPUT")
+
+            def send_msg_callback(sample: m87.Sample):
+                if sample and sample.payload:
+                    response = sample.payload.to_bytes().decode("utf-8")
+                    asyncio.create_task(ws.send_text(response))
+
+            sub = zenoh_interface.get_subscriber(name="AI_RESPONSE", handler=send_msg_callback)
+
             while True:
                 msg = await ws.receive_text()
                 try:
-                    response = requester.get(payload=msg.encode("utf-8"))
-                    for r in response:
-                        if r.ok is not None:
-                            response = r.ok.payload.to_bytes().decode("utf-8")
-                            await ws.send_text(response)
+                    publisher.put(payload=msg.encode("utf-8"))
                 except Exception as e:
                     await ws.send_text(f"Error processing message: {e}")
         except WebSocketDisconnect:

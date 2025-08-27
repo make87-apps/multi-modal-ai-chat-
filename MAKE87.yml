@@ -33,11 +33,13 @@ interfaces:
         spec:
           string: string
         encoding: utf-8
-    requesters:
-      - name: agent-chat
-        request_spec:
+      - name: AI_RESPONSE
+        spec:
           string: string
-        response_spec:
+        encoding: utf-8
+    publishers:
+      - name: USER_INPUT
+        spec:
           string: string
         encoding: utf-8
 container_config: {}
