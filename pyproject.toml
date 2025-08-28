@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "app"
 version = "0.0.1"
 dependencies = [
-  "make87[zenoh,protobuf]==0.1.0.dev2",
+  "make87[zenoh,protobuf]==0.1.0",
   "make87-messages-pb5",
   "fastapi",
   "uvicorn[standard]"

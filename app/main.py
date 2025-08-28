@@ -32,26 +32,67 @@ async def serve_ui_with_zenoh():
     @app.websocket("/ws-agent")
     async def ws_chat(ws: WebSocket):
         await ws.accept()
-        try:
-            publisher = zenoh_interface.get_publisher(name="USER_INPUT")
+        pub = zenoh_interface.get_publisher(name="USER_INPUT")
+        sub = zenoh_interface.get_subscriber(name="AI_RESPONSE")
+        stop = asyncio.Event()
 
-            def send_msg_callback(sample: zenoh.Sample):
-                if sample and sample.payload:
-                    response = sample.payload.to_bytes().decode("utf-8")
-                    asyncio.create_task(ws.send_text(response))
-
-            sub = zenoh_interface.get_subscriber(name="AI_RESPONSE", handler=send_msg_callback)
-
-            while True:
-                msg = await ws.receive_text()
+        async def ws_to_zenoh():
+            try:
+                while not stop.is_set():
+                    msg = await ws.receive_text()  # raises on disconnect
+                    pub.put(payload=msg.encode("utf-8"))
+            except WebSocketDisconnect:
+                pass
+            except Exception as e:
+                # best-effort error surface; ignore if socket already closed
                 try:
-                    publisher.put(payload=msg.encode("utf-8"))
-                except Exception as e:
                     await ws.send_text(f"Error processing message: {e}")
-        except WebSocketDisconnect:
-            logging.info("WebSocket disconnected")
-        except KeyError as e:
-            await ws.send_text("No agent available to chat with.")
+                except Exception:
+                    pass
+            finally:
+                stop.set()
+
+        async def zenoh_to_ws_try_receive(poll_sleep: float = 0.01):
+            try:
+                while not stop.is_set():
+                    r = None
+                    try:
+                        r = sub.try_recv()  # None when no sample available
+                        if r and r.payload:
+                            payload = r.payload.to_bytes().decode("utf-8")
+                            if payload:
+                                await ws.send_text(payload)
+                    except Exception:
+                        # If the subscriber glitches, keep the loop alive
+                        await asyncio.sleep(poll_sleep)
+                        continue
+            except WebSocketDisconnect:
+                pass
+            except Exception:
+                pass
+            finally:
+                stop.set()
+
+        t_send = asyncio.create_task(zenoh_to_ws_try_receive())
+        t_recv = asyncio.create_task(ws_to_zenoh())
+
+        try:
+            await asyncio.wait({t_send, t_recv}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            stop.set()
+            for t in (t_send, t_recv):
+                if not t.done():
+                    t.cancel()
+            # Cleanup (no-ops if methods don’t exist)
+            for closer in (getattr(sub, "close", None), getattr(pub, "close", None)):
+                try:
+                    if callable(closer): closer()
+                except Exception:
+                    pass
+            try:
+                await ws.close()
+            except Exception:
+                pass
 
     @app.websocket("/ws-image")
     async def websocket_image(ws: WebSocket):
